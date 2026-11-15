@@ -1,0 +1,55 @@
+# Compila el firmware de fàbrica (Brookesia) amb els canvis de Jarvis
+# (carpeta jarvis/) i en deixa un únic .bin per gravar a l'adreça 0x0.
+# Cap adreça ni clau API passa per aquí: es posen a la placa (Settings > Jarvis).
+name: Build Jarvis firmware
+
+on:
+  push:
+    branches: [jarvis]
+    paths:
+      - "jarvis/**"
+      - ".github/workflows/build-jarvis.yml"
+  workflow_dispatch:
+    inputs:
+      wake_word:
+        description: "Paraula d'activació: jarvis, hiesp, alexa o nihaoxiaozhi"
+        required: false
+        default: "jarvis"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-jarvis-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    container: espressif/idf:v5.5.4
+    env:
+      WAKE_WORD: ${{ github.event.inputs.wake_word || 'jarvis' }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Apply Jarvis changes
+        shell: bash
+        run: python3 jarvis/apply_jarvis.py firmware/brookesia "$WAKE_WORD"
+      - name: Build
+        shell: bash
+        run: |
+          . "$IDF_PATH/export.sh"
+          idf.py -C firmware/brookesia set-target esp32s3 build
+          grep -E "CONFIG_SR_WN_WN9_.*=y" firmware/brookesia/sdkconfig
+      - name: Merge into one image
+        shell: bash
+        run: |
+          . "$IDF_PATH/export.sh"
+          cd firmware/brookesia/build
+          cat flash_args
+          python -m esptool --chip esp32s3 merge_bin -o "$GITHUB_WORKSPACE/jarvis-aichats-full.bin" @flash_args
+          ls -la "$GITHUB_WORKSPACE/jarvis-aichats-full.bin"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: jarvis-aichats-firmware
+          path: jarvis-aichats-full.bin
+          retention-days: 30
