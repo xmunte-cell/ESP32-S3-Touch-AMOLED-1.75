@@ -27,7 +27,7 @@ constexpr char NVS_NS[] = "jarvis";
 
 constexpr char DEFAULT_MODEL[] = "qwen36";
 constexpr char DEFAULT_LANGUAGE[] = "ca";
-constexpr char DEFAULT_NAME[] = "ONA";
+constexpr char DEFAULT_NAME[] = "Jarvis";
 
 // "ONA" -> "Ona" for sentences.
 std::string titleCase(const std::string &name)

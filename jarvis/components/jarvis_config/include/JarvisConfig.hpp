@@ -21,7 +21,7 @@ struct Settings {
     std::string tts_model;    // e.g. tts-1
     std::string ics_url;      // Google Calendar private iCal address (secret)
     std::string eap_user;     // user name for a company (WPA2-Enterprise) Wi-Fi
-    std::string name;         // assistant name shown on screen (default ONA)
+    std::string name;         // assistant name shown on screen (default Jarvis)
 };
 
 // Reads the current settings (defaults filled in for empty fields).
