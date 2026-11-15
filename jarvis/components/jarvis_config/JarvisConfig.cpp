@@ -27,9 +27,29 @@ constexpr char NVS_NS[] = "jarvis";
 
 constexpr char DEFAULT_MODEL[] = "qwen36";
 constexpr char DEFAULT_LANGUAGE[] = "ca";
-constexpr char DEFAULT_PROMPT[] =
-    "Ets Jarvis, un assistent de veu. Respon sempre en català, en una o dues "
-    "frases curtes, sense llistes ni format.";
+constexpr char DEFAULT_NAME[] = "ONA";
+
+// "ONA" -> "Ona" for sentences.
+std::string titleCase(const std::string &name)
+{
+    std::string out = name;
+    bool first = true;
+    for (char &c : out) {
+        if (c >= 'A' && c <= 'Z' && !first) {
+            c = static_cast<char>(c - 'A' + 'a');
+        } else if (c >= 'a' && c <= 'z' && first) {
+            c = static_cast<char>(c - 'a' + 'A');
+        }
+        first = c == ' ' || c == '-';
+    }
+    return out;
+}
+
+std::string defaultPrompt(const std::string &name)
+{
+    return "Ets " + titleCase(name) + ", un assistent de veu. Respon sempre en català, en una o dues "
+           "frases curtes, sense llistes ni format.";
+}
 constexpr char DEFAULT_TTS_MODEL[] = "tts-1";
 
 std::mutex g_mutex;
@@ -152,6 +172,8 @@ esp_err_t handleRoot(httpd_req_t *req)
     b += "<label>Clau API</label><input name=key type=password autocomplete=off placeholder='";
     b += s.api_key.empty() ? "sk-..." : "(desada; deixa-ho buit per mantenir-la)";
     b += "'><small>Open WebUI &gt; Configuració &gt; Compte &gt; Claus API.</small>";
+    b += "<label>Nom de l'assistent</label><input name=name maxlength=16 value=\"" + htmlEscape(s.name) + "\">";
+    b += "<small>Surt a la pantalla. La paraula per activar-lo continua sent \"Jarvis\".</small>";
     b += "<label>Model</label><input name=model value=\"" + htmlEscape(s.model) + "\">";
     b += "<label>Idioma de Whisper</label><input name=lang value=\"" + htmlEscape(s.language) + "\">";
     b += "<label>Instruccions (system prompt)</label><textarea name=prompt rows=4>" +
@@ -360,6 +382,16 @@ esp_err_t handleSave(httpd_req_t *req)
     formField(body, "voice", voice);
     formField(body, "tts_model", tts_model);
     formField(body, "ics", ics);
+    std::string name;
+    formField(body, "name", name);
+    trimSlash(name);
+    {
+        // Keep the prompt "automatic" (follows the name) unless it was edited.
+        Settings before = load();
+        if (prompt == before.system_prompt && prompt == defaultPrompt(before.name)) {
+            prompt.clear();
+        }
+    }
     trimSlash(ics);
     trimSlash(url);
     trimSlash(key);
@@ -377,6 +409,7 @@ esp_err_t handleSave(httpd_req_t *req)
             nvs_set_str(h, "prompt", prompt.c_str());
             nvs_set_str(h, "voice", voice.c_str());
             nvs_set_str(h, "tts_model", tts_model.c_str());
+            nvs_set_str(h, "name", name.c_str());
             if (ics == "-") {
                 nvs_erase_key(h, "ics");
             } else if (!ics.empty()) {
@@ -461,11 +494,13 @@ Settings load()
         s.tts_model = nvsGet(h, "tts_model");
         s.ics_url = nvsGet(h, "ics");
         s.eap_user = nvsGet(h, "eap_user");
+        s.name = nvsGet(h, "name");
         nvs_close(h);
     }
     if (s.model.empty()) s.model = DEFAULT_MODEL;
     if (s.language.empty()) s.language = DEFAULT_LANGUAGE;
-    if (s.system_prompt.empty()) s.system_prompt = DEFAULT_PROMPT;
+    if (s.name.empty()) s.name = DEFAULT_NAME;
+    if (s.system_prompt.empty()) s.system_prompt = defaultPrompt(s.name);
     if (s.tts_model.empty()) s.tts_model = DEFAULT_TTS_MODEL;
     return s;
 }
@@ -474,7 +509,7 @@ bool saveField(const char *field, const std::string &value)
 {
     std::string v = value;
     if (strcmp(field, "url") == 0 || strcmp(field, "key") == 0 || strcmp(field, "ics") == 0 ||
-            strcmp(field, "eap_user") == 0) {
+            strcmp(field, "eap_user") == 0 || strcmp(field, "name") == 0) {
         trimSlash(v);
     }
     std::lock_guard<std::mutex> lock(g_mutex);

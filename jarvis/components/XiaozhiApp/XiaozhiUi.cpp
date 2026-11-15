@@ -29,6 +29,7 @@
 #include "esp_heap_caps.h"
 #include "esp_log.h"
 
+#include "JarvisConfig.hpp"
 #include "XiaozhiLocalization.hpp"
 #include "system_status.hpp"
 
@@ -41,7 +42,6 @@ namespace esp_brookesia::apps {
 namespace {
 
 constexpr char TAG[] = "JarvisUi";
-constexpr char ASSISTANT_NAME[] = "JARVIS";
 
 constexpr int SCREEN = 466;
 constexpr int CANVAS_W = 230;
@@ -269,7 +269,15 @@ bool XiaozhiUi::create(
 
     _name_label = makeLabel(stage, &jv_font_bold_34, 0xFFFFFF);
     lv_obj_align(_name_label, LV_ALIGN_TOP_MID, 0, 44);
-    lv_label_set_text(_name_label, ASSISTANT_NAME);
+    {
+        std::string name = jarvis::load().name;
+        for (char &c : name) {
+            if (c >= 'a' && c <= 'z') {
+                c = static_cast<char>(c - 'a' + 'A');
+            }
+        }
+        lv_label_set_text(_name_label, name.c_str());
+    }
     lv_obj_set_style_text_letter_space(_name_label, 3, LV_PART_MAIN);
 
     // Holographic head canvas

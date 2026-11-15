@@ -21,12 +21,13 @@ struct Settings {
     std::string tts_model;    // e.g. tts-1
     std::string ics_url;      // Google Calendar private iCal address (secret)
     std::string eap_user;     // user name for a company (WPA2-Enterprise) Wi-Fi
+    std::string name;         // assistant name shown on screen (default ONA)
 };
 
 // Reads the current settings (defaults filled in for empty fields).
 Settings load();
 
-// Saves one field. Keys: "url", "key", "model", "lang", "prompt", "voice", "tts_model", "ics", "eap_user".
+// Saves one field. Keys: "url", "key", "model", "lang", "prompt", "voice", "tts_model", "ics", "eap_user", "name".
 bool saveField(const char *field, const std::string &value);
 
 // true when URL and API key are set.

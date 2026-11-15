@@ -31,7 +31,7 @@ constexpr const char *UI_TEXTS[] = {
 // Jarvis: textos de l'app en català
 constexpr const char *UI_TEXTS[] = {
     "Cal connexió WiFi",
-    "Preparant Jarvis",
+    "Preparant l'assistent",
     "Falta configurar el servidor",
     "Connectant",
     "Digues \"Jarvis\"",

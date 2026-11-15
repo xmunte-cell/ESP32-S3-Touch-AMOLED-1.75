@@ -16,7 +16,7 @@
 namespace esp_brookesia::apps
 {
     namespace {
-        constexpr int FIELD_COUNT = 7;
+        constexpr int FIELD_COUNT = 8;
     }
 
     JarvisPage *JarvisPage::_instance = nullptr;
@@ -61,6 +61,7 @@ namespace esp_brookesia::apps
     void JarvisPage::buildList()
     {
         static const Field fields[FIELD_COUNT] = {
+            {"name", "Assistant name (wake word stays Jarvis)", false},
             {"url", "Open WebUI server (http://IP:port)", false},
             {"key", "API key (sk-...)", true},
             {"model", "Model", false},
@@ -86,6 +87,7 @@ namespace esp_brookesia::apps
             key = "****";
         }
         const std::string values[FIELD_COUNT] = {
+            s.name,
             s.url.empty() ? "(not set)" : s.url,
             key,
             s.model,
@@ -99,7 +101,7 @@ namespace esp_brookesia::apps
         lv_obj_add_style(list1, &style_list, LV_PART_MAIN);
 
         settings_ui::add_section(list1, "Tap a value to edit", style_list_text);
-        const char *names[FIELD_COUNT] = {"Server", "API key", "Model", "Language", "Voice", "TTS model", "Wi-Fi user"};
+        const char *names[FIELD_COUNT] = {"Name", "Server", "API key", "Model", "Language", "Voice", "TTS model", "Wi-Fi user"};
         for (int i = 0; i < FIELD_COUNT; i++) {
             lv_obj_t *row = settings_ui::add_info_row(list1, nullptr, names[i], values[i].c_str(), style_list_btn);
             lv_obj_add_style(row, &style_list_btn_pressed, LV_STATE_PRESSED);
