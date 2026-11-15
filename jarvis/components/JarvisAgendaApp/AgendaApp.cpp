@@ -221,6 +221,21 @@ bool AgendaApp::run()
         _cell_dots[i] = dot;
     }
 
+    // Exit button (left edge): goes back to the home screen.
+    {
+        lv_obj_t *exit_btn = plain(_root);
+        lv_obj_set_size(exit_btn, 46, 46);
+        lv_obj_align(exit_btn, LV_ALIGN_LEFT_MID, 20, 0);
+        lv_obj_set_style_radius(exit_btn, LV_RADIUS_CIRCLE, LV_PART_MAIN);
+        lv_obj_set_style_bg_color(exit_btn, lv_color_hex(0x1C2A30), LV_PART_MAIN);
+        lv_obj_set_style_bg_opa(exit_btn, LV_OPA_COVER, LV_PART_MAIN);
+        lv_obj_set_style_bg_color(exit_btn, lv_color_hex(COLOR_CYAN), LV_STATE_PRESSED);
+        lv_obj_add_flag(exit_btn, LV_OBJ_FLAG_CLICKABLE);
+        lv_obj_set_ext_click_area(exit_btn, 10);
+        lv_obj_add_event_cb(exit_btn, exitCb, LV_EVENT_CLICKED, this);
+        lv_obj_center(label(exit_btn, &jv_font_bold_20, 0xB8C4CC, "\xC3\x97"));
+    }
+
     _day_label = label(_root, &jv_font_bold_20, COLOR_AMBER, "");
     lv_obj_align(_day_label, LV_ALIGN_TOP_MID, 0, GRID_Y + 6 * CELL_H + 6);
 
@@ -426,6 +441,14 @@ void AgendaApp::timerCb(lv_timer_t *timer)
         self->_seen_revision = rev;
         self->refreshMonth();
         self->refreshList();
+    }
+}
+
+void AgendaApp::exitCb(lv_event_t *event)
+{
+    auto *self = static_cast<AgendaApp *>(lv_event_get_user_data(event));
+    if (self) {
+        self->notifyCoreClosed();
     }
 }
 

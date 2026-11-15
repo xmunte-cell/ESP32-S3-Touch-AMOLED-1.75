@@ -42,6 +42,8 @@ public:
     void clearChatMessages();
     void setEmotion(const char *emotion);
     void setActivation(const char *code, const char *message, bool visible);
+    // Jarvis: called when the on-screen exit button is tapped.
+    void setExitCallback(ActionCallback callback, void *context);
 
     lv_obj_t *root() const
     {
@@ -64,6 +66,7 @@ private:
     void applyMode(Mode mode);
     static void animTimerCb(lv_timer_t *timer);
     static void rootClickedCb(lv_event_t *event);
+    static void exitClickedCb(lv_event_t *event);
 
     lv_obj_t *_root = nullptr;
     lv_obj_t *_ring = nullptr;
@@ -79,6 +82,8 @@ private:
     lv_timer_t *_anim_timer = nullptr;
     ActionCallback _action_cb = nullptr;
     void *_action_ctx = nullptr;
+    ActionCallback _exit_cb = nullptr;
+    void *_exit_ctx = nullptr;
 
     uint16_t *_canvas_buf = nullptr;
     uint32_t _canvas_stride_px = 0;

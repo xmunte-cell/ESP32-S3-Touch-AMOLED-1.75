@@ -109,6 +109,15 @@ def main():
     }
 
 ''')
+    # On-screen exit button (the swipe-up gesture is hard to hit on the round screen).
+    patch(app, "    _ui_timer = lv_timer_create(uiTimerCallback, 100, this);\n",
+          "    _ui->setExitCallback([](void *context) {\n"
+          "        auto *self = static_cast<XiaozhiApp *>(context);\n"
+          "        if (self) {\n"
+          "            self->notifyCoreClosed();\n"
+          "        }\n"
+          "    }, this);\n"
+          "    _ui_timer = lv_timer_create(uiTimerCallback, 100, this);\n")
     # The spoken activation code makes no sense without Xiaozhi.
     patch(app, "bool XiaozhiApp::announceActivation(bool force)\n{\n",
           "bool XiaozhiApp::announceActivation(bool force)\n{\n"

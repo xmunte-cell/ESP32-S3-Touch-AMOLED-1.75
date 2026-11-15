@@ -63,6 +63,7 @@ private:
     static void nextCb(lv_event_t *event);
     static void cellCb(lv_event_t *event);
     static void todayCb(lv_event_t *event);
+    static void exitCb(lv_event_t *event);
 };
 
 } // namespace esp_brookesia::apps

@@ -329,6 +329,24 @@ bool XiaozhiUi::create(
     lv_obj_set_width(_activation_message_label, lv_pct(100));
     lv_label_set_long_mode(_activation_message_label, LV_LABEL_LONG_MODE_WRAP);
 
+    // Exit button (left edge): goes back to the home screen.
+    {
+        lv_obj_t *exit_btn = lv_obj_create(stage);
+        prepareTransparentObject(exit_btn);
+        lv_obj_set_size(exit_btn, 50, 50);
+        lv_obj_align(exit_btn, LV_ALIGN_LEFT_MID, 22, 0);
+        lv_obj_set_style_radius(exit_btn, LV_RADIUS_CIRCLE, LV_PART_MAIN);
+        lv_obj_set_style_bg_color(exit_btn, lv_color_hex(0x1C2A30), LV_PART_MAIN);
+        lv_obj_set_style_bg_opa(exit_btn, LV_OPA_COVER, LV_PART_MAIN);
+        lv_obj_set_style_bg_color(exit_btn, lv_color_hex(0x31E1FF), LV_STATE_PRESSED);
+        lv_obj_add_flag(exit_btn, LV_OBJ_FLAG_CLICKABLE);
+        lv_obj_set_ext_click_area(exit_btn, 12);
+        lv_obj_add_event_cb(exit_btn, exitClickedCb, LV_EVENT_CLICKED, this);
+        lv_obj_t *x = makeLabel(exit_btn, &jv_font_bold_20, 0xB8C4CC);
+        lv_label_set_text(x, "\xC3\x97");  // multiplication sign as a close cross
+        lv_obj_center(x);
+    }
+
     _mode_since_ms = lv_tick_get();
     applyMode(Mode::Connecting);
     updateBattery();
@@ -456,6 +474,20 @@ void XiaozhiUi::setActivation(const char *code, const char *message, bool visibl
 }
 
 // ---------------------------------------------------------------------------
+void XiaozhiUi::setExitCallback(ActionCallback callback, void *context)
+{
+    _exit_cb = callback;
+    _exit_ctx = context;
+}
+
+void XiaozhiUi::exitClickedCb(lv_event_t *event)
+{
+    auto *self = static_cast<XiaozhiUi *>(lv_event_get_user_data(event));
+    if (self && self->_exit_cb) {
+        self->_exit_cb(self->_exit_ctx);
+    }
+}
+
 void XiaozhiUi::rootClickedCb(lv_event_t *event)
 {
     auto *self = static_cast<XiaozhiUi *>(lv_event_get_user_data(event));
