@@ -16,7 +16,7 @@
 namespace esp_brookesia::apps
 {
     namespace {
-        constexpr int FIELD_COUNT = 6;
+        constexpr int FIELD_COUNT = 7;
     }
 
     JarvisPage *JarvisPage::_instance = nullptr;
@@ -67,6 +67,7 @@ namespace esp_brookesia::apps
             {"lang", "Whisper language", false},
             {"voice", "TTS voice (empty = text only)", false},
             {"tts_model", "TTS model", false},
+            {"eap_user", "Company Wi-Fi user (empty = normal Wi-Fi)", false},
         };
 
         if (list1 != nullptr)
@@ -91,13 +92,14 @@ namespace esp_brookesia::apps
             s.language,
             s.tts_voice.empty() ? "(text only)" : s.tts_voice,
             s.tts_model,
+            s.eap_user.empty() ? "(normal Wi-Fi)" : s.eap_user,
         };
 
         list1 = settings_ui::create_content_list(page_root);
         lv_obj_add_style(list1, &style_list, LV_PART_MAIN);
 
         settings_ui::add_section(list1, "Tap a value to edit", style_list_text);
-        const char *names[FIELD_COUNT] = {"Server", "API key", "Model", "Language", "Voice", "TTS model"};
+        const char *names[FIELD_COUNT] = {"Server", "API key", "Model", "Language", "Voice", "TTS model", "Wi-Fi user"};
         for (int i = 0; i < FIELD_COUNT; i++) {
             lv_obj_t *row = settings_ui::add_info_row(list1, nullptr, names[i], values[i].c_str(), style_list_btn);
             lv_obj_add_style(row, &style_list_btn_pressed, LV_STATE_PRESSED);

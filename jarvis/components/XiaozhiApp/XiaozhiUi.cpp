@@ -47,8 +47,6 @@ constexpr int SCREEN = 466;
 constexpr int CANVAS_W = 230;
 constexpr int CANVAS_H = 222;
 constexpr int CANVAS_Y = 86;          // top of the canvas on screen
-constexpr float MODEL_SCALE = 80.0f;  // pixels per model unit
-constexpr float MODEL_CY = 88.0f;     // canvas y of model origin (head centre)
 constexpr int FRAME_MS = 66;          // ~15 fps
 constexpr int SPARKLES = 26;
 
@@ -59,12 +57,8 @@ constexpr uint32_t COLOR_THINK = 0xFFB347;
 constexpr uint32_t COLOR_SPEAK = 0x3DF5B5;
 constexpr uint32_t COLOR_ERROR = 0xFF5050;
 
-constexpr uint8_t KIND_SKIN = 0;
-constexpr uint8_t KIND_EYE = 1;
-constexpr uint8_t KIND_LIP_UP = 2;
-constexpr uint8_t KIND_LIP_DOWN = 3;
-constexpr uint8_t KIND_PEDESTAL = 4;
-constexpr uint8_t KIND_NECK = 5;
+constexpr uint8_t KIND_SKIN = 0;   // outer shell
+constexpr uint8_t KIND_EYE = 1;    // inner core
 
 uint32_t modeColor(XiaozhiUi::Mode mode)
 {
@@ -170,132 +164,51 @@ bool XiaozhiUi::preload()
     return true;
 }
 
-// Builds an original, stylised head as a cloud of points (model units: the
-// head spans y = -1 (crown) .. +1 (chin), x/z are about +-0.75).
+// Builds an abstract cloud of points: a shell of evenly spread points
+// (Fibonacci sphere) with a little random depth, plus a sparse inner core.
+// Model units: radius about 1.
 void XiaozhiUi::buildModel()
 {
-    constexpr int MAX_POINTS = 1400;
+    constexpr int SHELL = 760;
+    constexpr int CORE = 240;
+    constexpr int MAX_POINTS = SHELL + CORE;
     _points = static_cast<Point *>(
                   heap_caps_malloc(sizeof(Point) * MAX_POINTS, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
     if (!_points) {
         _points = static_cast<Point *>(heap_caps_malloc(sizeof(Point) * MAX_POINTS, MALLOC_CAP_8BIT));
     }
     if (!_points) {
-        ESP_LOGE(TAG, "No memory for the head model");
+        ESP_LOGE(TAG, "No memory for the point cloud");
         return;
     }
+    uint32_t seed = 0x9E3779B9u;
+    auto rnd = [&seed]() {
+        seed ^= seed << 13;
+        seed ^= seed >> 17;
+        seed ^= seed << 5;
+        return (seed & 0xFFFF) / 65535.0f;
+    };
     uint16_t n = 0;
-    auto add = [&](float x, float y, float z, uint8_t kind) {
-        if (n < MAX_POINTS) {
-            _points[n++] = {(int16_t)(x * 1000), (int16_t)(y * 1000), (int16_t)(z * 1000), kind};
-        }
-    };
-
-    auto halfWidth = [](float y) {
-        float a = 0.74f;
-        if (y > 0.25f) {
-            float t = (y - 0.25f) / 0.75f;
-            a *= 1.0f - 0.42f * powf(t, 1.4f);  // jaw tapers towards the chin
-        }
-        return a;
-    };
-    auto halfDepth = [](float y) {
-        float c = 0.84f;
-        if (y > 0.35f) {
-            float t = (y - 0.35f) / 0.65f;
-            c *= 1.0f - 0.30f * t;
-        }
-        return c;
-    };
-    // Front surface depth at (x, y), used to place facial features.
-    auto surfaceZ = [&](float x, float y) {
-        float s = 1.0f - y * y;
-        if (s < 0) s = 0;
-        float a = halfWidth(y) * sqrtf(s);
-        float c = halfDepth(y) * sqrtf(s);
-        float u = a > 0 ? x / a : 0;
-        float w = 1.0f - u * u;
-        return w > 0 ? c * sqrtf(w) : 0.0f;
-    };
-
-    const float eye_y = -0.06f, eye_x = 0.27f, eye_r = 0.085f;
-
-    // Skull and face surface (latitude rings)
-    const int rings = 24;
-    for (int i = 1; i < rings; i++) {
-        float th = (float)M_PI * i / rings;
-        float y = -cosf(th);
-        if (y > 0.97f) {
-            break;
-        }
-        float s = sinf(th);
-        float a = halfWidth(y) * s;
-        float c = halfDepth(y) * s;
-        int seg = (int)(10 + 34 * s);
-        for (int j = 0; j < seg; j++) {
-            float ph = 2.0f * (float)M_PI * (j + 0.5f * (i & 1)) / seg;
-            float x = a * cosf(ph);
-            float z = c * sinf(ph);
-            // leave the eye sockets empty so the eyes read clearly
-            if (z > 0 && (fabsf(fabsf(x) - eye_x) < eye_r * 1.4f) && fabsf(y - eye_y) < eye_r * 1.3f) {
-                continue;
-            }
-            add(x, y, z, KIND_SKIN);
-        }
+    const float golden = (float)M_PI * (3.0f - sqrtf(5.0f));
+    for (int i = 0; i < SHELL; i++) {
+        float y = 1.0f - 2.0f * (i + 0.5f) / SHELL;
+        float r = sqrtf(1.0f - y * y);
+        float th = golden * i;
+        float depth = 0.90f + 0.14f * rnd();
+        _points[n++] = {(int16_t)(r * cosf(th) * depth * 1000), (int16_t)(y * depth * 1000),
+                        (int16_t)(r * sinf(th) * depth * 1000), KIND_SKIN};
     }
-    // Eyes: bright rings with a pupil
-    for (int side = -1; side <= 1; side += 2) {
-        float cx = side * eye_x;
-        float cz = surfaceZ(cx, eye_y) - 0.02f;
-        for (int k = 0; k < 16; k++) {
-            float ph = 2.0f * (float)M_PI * k / 16;
-            add(cx + eye_r * cosf(ph), eye_y + eye_r * 0.65f * sinf(ph), cz, KIND_EYE);
-        }
-        add(cx, eye_y, cz + 0.01f, KIND_EYE);
-        add(cx + 0.02f, eye_y, cz + 0.01f, KIND_EYE);
-        add(cx - 0.02f, eye_y, cz + 0.01f, KIND_EYE);
-        // brow
-        for (int k = -4; k <= 4; k++) {
-            float x = cx + k * 0.03f;
-            add(x, eye_y - 0.14f - 0.01f * (4 - abs(k)) * 0.5f, surfaceZ(x, eye_y - 0.14f) + 0.02f, KIND_SKIN);
-        }
-    }
-    // Nose ridge and tip
-    for (int k = 0; k <= 12; k++) {
-        float t = k / 12.0f;
-        float y = -0.02f + 0.30f * t;
-        add(0, y, surfaceZ(0, y) + 0.13f * t, KIND_SKIN);
-    }
-    for (int k = -3; k <= 3; k++) {
-        add(k * 0.03f, 0.29f, surfaceZ(k * 0.03f, 0.29f) + 0.08f, KIND_SKIN);
-    }
-    // Lips (lower lip moves when speaking)
-    for (int k = -9; k <= 9; k++) {
-        float x = k * 0.024f;
-        float curve = 0.018f * (1.0f - (k * k) / 81.0f);
-        float z = surfaceZ(x, 0.48f) + 0.03f;
-        add(x, 0.47f - curve, z, KIND_LIP_UP);
-        add(x, 0.49f + curve, z, KIND_LIP_DOWN);
-    }
-    // Neck
-    for (int r = 0; r < 6; r++) {
-        float y = 0.88f + r * 0.09f;
-        for (int j = 0; j < 22; j++) {
-            float ph = 2.0f * (float)M_PI * (j + 0.5f * (r & 1)) / 22;
-            add(0.30f * cosf(ph), y, 0.33f * sinf(ph), KIND_NECK);
-        }
-    }
-    // Pedestal: two flat rings
-    for (int ring = 0; ring < 2; ring++) {
-        float rad = ring ? 0.98f : 0.70f;
-        int seg = ring ? 64 : 48;
-        for (int j = 0; j < seg; j++) {
-            float ph = 2.0f * (float)M_PI * j / seg;
-            add(rad * cosf(ph), 1.48f, rad * sinf(ph), KIND_PEDESTAL);
-        }
+    for (int i = 0; i < CORE; i++) {
+        // random direction, radius biased towards the centre
+        float u = rnd() * 2.0f - 1.0f;
+        float ph = rnd() * 2.0f * (float)M_PI;
+        float r = sqrtf(1.0f - u * u);
+        float rad = 0.15f + 0.6f * rnd() * rnd();
+        _points[n++] = {(int16_t)(r * cosf(ph) * rad * 1000), (int16_t)(u * rad * 1000),
+                        (int16_t)(r * sinf(ph) * rad * 1000), KIND_EYE};
     }
     _point_count = n;
-    ESP_LOGI(TAG, "Head model: %u points", (unsigned)n);
+    ESP_LOGI(TAG, "Point cloud: %u points", (unsigned)n);
 }
 
 // ---------------------------------------------------------------------------
@@ -636,97 +549,95 @@ void XiaozhiUi::renderFrame()
     const uint32_t color = modeColor(_mode);
     const uint32_t eye_color = mixWhite(color, 150);
 
-    // Head motion per state
-    float yaw_amp = 0.30f, yaw_speed = 0.5f, nod = 0.0f;
+    // Cloud motion per state
+    float spin = 0.35f;       // rotation speed (rad/s)
+    float breathe = 0.035f;   // slow size change
+    float ripple = 0.0f;      // surface waves (listening)
+    float twist = 0.0f;       // swirl (thinking)
+    float pulse = 0.0f;       // beat (speaking)
+    float size = 1.0f;
     switch (_mode) {
-    case Mode::Listening: yaw_amp = 0.12f; yaw_speed = 0.8f; nod = 0.06f * sinf(t * 2.2f); break;
-    case Mode::Thinking:  yaw_amp = 0.45f; yaw_speed = 0.9f; nod = -0.10f; break;
-    case Mode::Speaking:  yaw_amp = 0.18f; yaw_speed = 0.7f; nod = 0.03f * sinf(t * 5.0f); break;
-    case Mode::Error:     yaw_amp = 0.05f; nod = 0.15f; break;
-    default: break;
+    case Mode::Listening:
+        spin = 0.5f;
+        ripple = 0.10f;
+        break;
+    case Mode::Thinking:
+        spin = 1.6f;
+        twist = 1.1f * sinf(t * 0.9f);
+        breathe = 0.02f;
+        break;
+    case Mode::Speaking:
+        spin = 0.6f;
+        pulse = fabsf(sinf(t * 9.0f) * 0.6f + sinf(t * 14.0f) * 0.4f);
+        break;
+    case Mode::Error:
+        spin = 0.12f;
+        size = 0.82f;
+        break;
+    case Mode::Connecting:
+        spin = 0.9f;
+        breathe = 0.06f;
+        break;
+    default:
+        break;
     }
-    const float yaw = yaw_amp * sinf(t * yaw_speed);
-    const float cy = cosf(yaw), sy = sinf(yaw);
-    const float cp = cosf(nod), sp = sinf(nod);
-
-    float mouth = 0.0f;
-    if (_mode == Mode::Speaking) {
-        mouth = fabsf(sinf(t * 11.0f) * 0.7f + sinf(t * 17.0f) * 0.3f);
-    }
-    // Scanline sweep (a bright band moving down the head)
-    const float scan_y = fmodf(t * 0.9f, 3.0f) - 1.2f;
+    // a gentle fade-in of the new style after a state change
+    const float settle = tm < 0.6f ? tm / 0.6f : 1.0f;
+    const float base = size * (1.0f + breathe * sinf(t * 1.3f)) * (1.0f + 0.14f * pulse * settle);
+    const float tilt = 0.35f;
+    const float ct = cosf(tilt), st = sinf(tilt);
 
     const uint32_t stride = _canvas_stride_px;
     memset(_canvas_buf, 0, (size_t)stride * 2 * CANVAS_H);
 
     const float half_w = CANVAS_W * 0.5f;
+    const float half_h = CANVAS_H * 0.5f;
+    const float scale = 84.0f;
     for (uint16_t i = 0; i < _point_count; i++) {
         const Point &p = _points[i];
         float x = p.x * 0.001f, y = p.y * 0.001f, z = p.z * 0.001f;
-        if (p.kind == KIND_LIP_DOWN) {
-            y += mouth * 0.09f;
+        const bool core = p.kind == KIND_EYE;
+
+        float r = base;
+        if (ripple > 0.0f && !core) {
+            r *= 1.0f + ripple * settle * sinf(y * 7.0f + t * 6.0f) * cosf(x * 5.0f - t * 3.0f);
         }
-        float rx, ry, rz;
-        if (p.kind == KIND_PEDESTAL) {
-            // the pedestal spins slowly on its own and does not nod
-            float a = t * 0.6f;
-            rx = x * cosf(a) - z * sinf(a);
-            rz = x * sinf(a) + z * cosf(a);
-            ry = y;
-            rz *= 0.18f;  // seen almost edge-on
-        } else {
-            // yaw (around Y), then nod (around X)
-            float x1 = x * cy + z * sy;
-            float z1 = -x * sy + z * cy;
-            ry = y * cp - z1 * sp;
-            rz = y * sp + z1 * cp;
-            rx = x1;
+        if (pulse > 0.0f && core) {
+            r *= 1.0f + 0.5f * pulse;  // the core flashes outwards when speaking
         }
-        float persp = 1.0f + rz * 0.12f;
-        int px = (int)(half_w + rx * MODEL_SCALE * persp);
-        int py = (int)(MODEL_CY + ry * MODEL_SCALE * persp);
-        if (p.kind == KIND_PEDESTAL) {
-            py = (int)(MODEL_CY + y * MODEL_SCALE + rz * 40.0f);
-        }
+        x *= r;
+        y *= r;
+        z *= r;
+
+        // spin around Y (twisted by height when thinking), then tilt around X
+        float a = t * spin + twist * y * settle;
+        float ca = cosf(a), sa = sinf(a);
+        float x1 = x * ca + z * sa;
+        float z1 = -x * sa + z * ca;
+        float ry = y * ct - z1 * st;
+        float rz = y * st + z1 * ct;
+        float rx = x1;
+
+        float persp = 1.0f + rz * 0.18f;
+        int px = (int)(half_w + rx * scale * persp);
+        int py = (int)(half_h + ry * scale * persp);
         if (px < 1 || px >= CANVAS_W - 1 || py < 1 || py >= CANVAS_H - 1) {
             continue;
         }
-
+        // front points brighter than back points
+        float d = (rz + 1.0f) / 2.0f;
+        if (d < 0) d = 0;
+        if (d > 1) d = 1;
         int k;
         uint32_t c = color;
-        bool big = false;
-        switch (p.kind) {
-        case KIND_EYE:
+        bool big;
+        if (core) {
             c = eye_color;
-            k = 255;
-            big = true;
-            break;
-        case KIND_LIP_UP:
-        case KIND_LIP_DOWN:
-            k = 230;
-            big = rz > 0;
-            break;
-        case KIND_PEDESTAL:
-            c = mixWhite(color, 60);
-            k = 200;
-            big = true;
-            break;
-        default: {
-            // front points brighter than back points
-            float d = (rz + 0.9f) / 1.8f;
-            if (d < 0) d = 0;
-            if (d > 1) d = 1;
-            k = 40 + (int)(170 * d);
-            big = rz > 0.25f;
-            if (p.kind == KIND_NECK) {
-                k = k * 3 / 4;
-            }
-            float ds = fabsf(ry - scan_y);
-            if (ds < 0.08f) {
-                k += (int)(90 * (1.0f - ds / 0.08f));
-            }
-            break;
-        }
+            k = 70 + (int)(110 * d) + (int)(90 * pulse);
+            big = pulse > 0.5f;
+        } else {
+            k = 35 + (int)(190 * d);
+            big = rz > 0.35f;
         }
         uint16_t *row = _canvas_buf + (size_t)py * stride;
         addPixel(&row[px], c, k);
@@ -737,23 +648,22 @@ void XiaozhiUi::renderFrame()
         }
     }
 
-    // Pedestal glow (a soft ellipse under the head)
+    // Soft glow in the centre
     {
-        int gy = (int)(MODEL_CY + 1.48f * MODEL_SCALE);
-        for (int dy = -7; dy <= 7; dy++) {
-            int yy = gy + dy;
+        const int gr = (int)(26 + 18 * pulse);
+        for (int dy = -gr; dy <= gr; dy++) {
+            int yy = (int)half_h + dy;
             if (yy < 0 || yy >= CANVAS_H) {
                 continue;
             }
-            float fy = dy / 7.0f;
-            int w = (int)(70 * sqrtf(1.0f - fy * fy));
             uint16_t *row = _canvas_buf + (size_t)yy * stride;
-            for (int dx = -w; dx <= w; dx++) {
+            for (int dx = -gr; dx <= gr; dx++) {
                 int xx = (int)half_w + dx;
-                if (xx >= 0 && xx < CANVAS_W) {
-                    float fx = (float)dx / (w + 1);
-                    addPixel(&row[xx], color, (int)(70 * (1.0f - fx * fx) * (1.0f - fabsf(fy))));
+                int d2 = dx * dx + dy * dy;
+                if (xx < 0 || xx >= CANVAS_W || d2 > gr * gr) {
+                    continue;
                 }
+                addPixel(&row[xx], color, (int)(55 * (1.0f - (float)d2 / (gr * gr))));
             }
         }
     }
@@ -762,9 +672,9 @@ void XiaozhiUi::renderFrame()
     for (int s = 0; s < SPARKLES; s++) {
         uint32_t h = (uint32_t)s * 2654435761u;
         float ang = (h & 0xFFFF) / 65535.0f * 6.2832f + t * (0.05f + (h >> 28) * 0.01f);
-        float rad = 1.05f + ((h >> 16) & 0xFF) / 255.0f * 0.35f;
-        int px = (int)(half_w + cosf(ang) * rad * MODEL_SCALE);
-        int py = (int)(MODEL_CY - 0.1f * MODEL_SCALE + sinf(ang) * rad * MODEL_SCALE * 0.9f);
+        float rad = 1.18f + ((h >> 16) & 0xFF) / 255.0f * 0.12f;
+        int px = (int)(half_w + cosf(ang) * rad * scale);
+        int py = (int)(half_h + sinf(ang) * rad * scale * 0.9f);
         if (px < 0 || px >= CANVAS_W - 1 || py < 0 || py >= CANVAS_H - 1) {
             continue;
         }

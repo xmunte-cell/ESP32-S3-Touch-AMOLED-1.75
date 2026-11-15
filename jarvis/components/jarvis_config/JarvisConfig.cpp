@@ -460,6 +460,7 @@ Settings load()
         s.tts_voice = nvsGet(h, "voice");
         s.tts_model = nvsGet(h, "tts_model");
         s.ics_url = nvsGet(h, "ics");
+        s.eap_user = nvsGet(h, "eap_user");
         nvs_close(h);
     }
     if (s.model.empty()) s.model = DEFAULT_MODEL;
@@ -472,7 +473,8 @@ Settings load()
 bool saveField(const char *field, const std::string &value)
 {
     std::string v = value;
-    if (strcmp(field, "url") == 0 || strcmp(field, "key") == 0 || strcmp(field, "ics") == 0) {
+    if (strcmp(field, "url") == 0 || strcmp(field, "key") == 0 || strcmp(field, "ics") == 0 ||
+            strcmp(field, "eap_user") == 0) {
         trimSlash(v);
     }
     std::lock_guard<std::mutex> lock(g_mutex);

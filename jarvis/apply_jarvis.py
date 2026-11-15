@@ -9,6 +9,8 @@ Usage:  python3 apply_jarvis.py <path to firmware/brookesia> [wake_word]
 * adds the "Agenda" app (month calendar, Google Calendar via its private
   iCal address, the board's own events) and gives Jarvis the agenda
 * sets the Spanish time zone (the factory firmware uses China time)
+* lets the WLAN page join company networks (user + password) as well as
+  normal ones (password only)
 * switches the wake word (default: Jarvis) and the device language to ca-ES
 
 No address or API key is written anywhere: they are entered on the board
@@ -188,8 +190,61 @@ def main():
         act.write_text(text.replace('"zh-CN"', '"ca-ES"'), encoding="utf-8")
         print("patched XiaozhiActivationClient.cpp (language)")
 
+
+    # 6. Wi-Fi: normal (password) and company networks (user + password) ----
+    wl = st / "ui" / "WlanPage.cpp"
+    patch(wl, '#include "nvs.h"\n',
+          '#include "nvs.h"\n#include "JarvisConfig.hpp"\n#include "JarvisWifi.hpp"\n\n'
+          '// Jarvis: for enterprise networks the keyboard first asks for the user.\n'
+          'static bool s_jv_ask_user = false;\n')
+    patch(wl, '            lv_keyboard_set_textarea(kb, ta);\n\n        }\n    }\n',
+          '            lv_keyboard_set_textarea(kb, ta);\n'
+          '            s_jv_ask_user = jarvis::wifi::isEnterprise(page->ap_info[page->wifi_index].authmode);\n'
+          '            lv_textarea_set_password_mode(ta, !s_jv_ask_user);\n'
+          '            lv_textarea_set_placeholder_text(ta, s_jv_ask_user ? "User name..." : "Enter password...");\n'
+          '            if (s_jv_ask_user) {\n'
+          '                lv_textarea_set_text(ta, jarvis::load().eap_user.c_str());\n'
+          '                if (page->password_title) {\n'
+          '                    lv_label_set_text_fmt(page->password_title, "%s: user", page->wifi_ssid);\n'
+          '                }\n'
+          '            }\n\n        }\n    }\n')
+    patch(wl, '        if (code == LV_EVENT_CANCEL) {\n',
+          '        if (code == LV_EVENT_CANCEL) {\n'
+          '            s_jv_ask_user = false;\n'
+          '            lv_textarea_set_password_mode(self->ta, true);\n')
+    patch(wl, '        if (code == LV_EVENT_READY) {\n\n            strlcpy(self->wifi_pwd, lv_textarea_get_text(ta), sizeof(self->wifi_pwd));\n',
+          '        if (code == LV_EVENT_READY && s_jv_ask_user) {\n'
+          '            // Step 1 of 2 on a company network: keep the user, then ask the password.\n'
+          '            s_jv_ask_user = false;\n'
+          '            jarvis::saveField("eap_user", lv_textarea_get_text(self->ta));\n'
+          '            lv_textarea_set_text(self->ta, "");\n'
+          '            lv_textarea_set_password_mode(self->ta, true);\n'
+          '            lv_textarea_set_placeholder_text(self->ta, "Enter password...");\n'
+          '            if (self->password_title) {\n'
+          '                lv_label_set_text_fmt(self->password_title, "%s: password", self->wifi_ssid);\n'
+          '            }\n'
+          '            return;\n'
+          '        }\n\n'
+          '        if (code == LV_EVENT_READY) {\n\n'
+          '            strlcpy(self->wifi_pwd, lv_textarea_get_text(ta), sizeof(self->wifi_pwd));\n')
+    patch(wl, '            if (strlen(self->wifi_pwd) >= 8)\n',
+          '            if (strlen(self->wifi_pwd) >= 8 ||\n'
+          '                    (self->wifi_pwd[0] != 0 &&\n'
+          '                     jarvis::wifi::isEnterprise(self->ap_info[self->wifi_index].authmode)))\n')
+
+    ss = comp / "system_status" / "system_status.cpp"
+    text = ss.read_text(encoding="utf-8")
+    first_include = text.index("#include")
+    ss.write_text(text[:first_include] + '#include "JarvisWifi.hpp"\n' + text[first_include:], encoding="utf-8")
+    patch(ss, "        const esp_err_t result = esp_wifi_connect();\n",
+          "        jarvis::wifi::prepareConnect();  // enterprise login when needed\n"
+          "        const esp_err_t result = esp_wifi_connect();\n")
+    patch(comp / "system_status" / "CMakeLists.txt", "        nvs_flash\n)", "        nvs_flash\n        jarvis_config\n)")
+
     sd = fw / "sdkconfig.defaults"
     patch(sd, "CONFIG_SR_WN_WN9_NIHAOXIAOZHI_TTS=y\n", WAKE_WORDS[wake] + "=y\n")
+    with open(sd, "a", encoding="utf-8") as f:
+        f.write("\n# Jarvis: company (WPA2/WPA3-Enterprise) Wi-Fi\nCONFIG_ESP_WIFI_ENTERPRISE_SUPPORT=y\n")
     print("Jarvis patch applied.")
 
 
