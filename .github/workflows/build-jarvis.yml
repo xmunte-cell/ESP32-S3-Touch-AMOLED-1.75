@@ -48,8 +48,13 @@ jobs:
           cat flash_args
           python -m esptool --chip esp32s3 merge_bin -o "$GITHUB_WORKSPACE/jarvis-aichats-full.bin" @flash_args
           ls -la "$GITHUB_WORKSPACE/jarvis-aichats-full.bin"
+          # App only (flash at 0x200000): keeps the settings saved on the board.
+          grep -q "^0x200000 esp32-s3-touch-amoled-brookesia.bin" flash_args
+          cp esp32-s3-touch-amoled-brookesia.bin "$GITHUB_WORKSPACE/jarvis-app-0x200000.bin"
       - uses: actions/upload-artifact@v4
         with:
           name: jarvis-aichats-firmware
-          path: jarvis-aichats-full.bin
+          path: |
+            jarvis-aichats-full.bin
+            jarvis-app-0x200000.bin
           retention-days: 30

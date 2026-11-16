@@ -241,6 +241,19 @@ def main():
           '                    (self->wifi_pwd[0] != 0 &&\n'
           '                     jarvis::wifi::isEnterprise(self->ap_info[self->wifi_index].authmode)))\n')
 
+    patch(wl, "                esp_err_t ret = brookesia::system_status::connect_wifi(wifi_config);\n",
+          "                {\n"
+          "                    // Jarvis: remember this network so the board can come back to it.\n"
+          "                    jarvis::wifi::Network jv_net;\n"
+          "                    jv_net.ssid = self->wifi_ssid;\n"
+          "                    jv_net.password = self->wifi_pwd;\n"
+          "                    if (jarvis::wifi::isEnterprise(self->ap_info[self->wifi_index].authmode)) {\n"
+          "                        jv_net.user = jarvis::load().eap_user;\n"
+          "                    }\n"
+          "                    jarvis::wifi::rememberNetwork(jv_net);\n"
+          "                }\n"
+          "                esp_err_t ret = brookesia::system_status::connect_wifi(wifi_config);\n")
+
     ss = comp / "system_status" / "system_status.cpp"
     text = ss.read_text(encoding="utf-8")
     first_include = text.index("#include")

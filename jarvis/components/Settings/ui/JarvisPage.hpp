@@ -33,6 +33,10 @@ private:
     void closeEditor(bool save);
     static void rowClickedCb(lv_event_t *e);
     static void keyboardCb(lv_event_t *e);
+    void openForget(size_t index);
+    static void networkClickedCb(lv_event_t *e);
+    static void forgetCb(lv_event_t *e);
+    size_t forget_index = 0;
 
     static JarvisPage *_instance;
     lv_obj_t *page_root;

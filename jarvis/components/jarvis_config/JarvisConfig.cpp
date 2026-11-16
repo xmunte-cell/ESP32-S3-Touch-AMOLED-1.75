@@ -3,6 +3,7 @@
  */
 #include "JarvisConfig.hpp"
 #include "JarvisAgenda.hpp"
+#include "JarvisWifi.hpp"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -148,7 +149,7 @@ const char PAGE_HEAD[] =
     "button.del{margin:0;padding:4px 10px;background:#3a1d22;color:#ff9090}"
     ".row{display:flex;gap:8px}.row>div{flex:1}"
     "</style></head><body><main><h1>JARVIS</h1>"
-    "<nav><a href=/>Configuració</a><a href=/agenda>Agenda</a></nav>";
+    "<nav><a href=/>Configuració</a><a href=/agenda>Agenda</a><a href=/wifi>Wi-Fi</a></nav>";
 
 esp_err_t sendPage(httpd_req_t *req, const std::string &body)
 {
@@ -357,6 +358,69 @@ esp_err_t handleAgendaDel(httpd_req_t *req)
     return redirectTo(req, "/agenda");
 }
 
+// Saved Wi-Fi networks: list, add (normal or company) and forget.
+esp_err_t handleWifi(httpd_req_t *req)
+{
+    std::vector<wifi::Network> nets = wifi::savedNetworks();
+    std::string b = "<h2>Xarxes Wi-Fi desades</h2>"
+                    "<p class=g>La placa es connecta sola a la xarxa desada que tingui a l'abast "
+                    "(m&agrave;xim 5). Les contrasenyes no es mostren mai.</p>";
+    if (nets.empty()) {
+        b += "<p class=g>Encara no n'hi ha cap.</p>";
+    } else {
+        b += "<table>";
+        for (size_t i = 0; i < nets.size(); i++) {
+            b += "<tr><td>" + htmlEscape(nets[i].ssid) + "<div class=g>" +
+                 (nets[i].user.empty() ? std::string("Nom&eacute;s contrasenya")
+                                       : "Usuari: " + htmlEscape(nets[i].user)) +
+                 "</div></td><td style='width:1%'><form method=post action=/wifi/del>"
+                 "<input type=hidden name=i value=" + std::to_string(i) +
+                 "><button class=del type=submit>Oblidar</button></form></td></tr>";
+        }
+        b += "</table>";
+    }
+    b += "<h2>Afegir una xarxa</h2><form method=post action=/wifi/add>"
+         "<label>Nom de la xarxa (SSID)</label><input name=ssid maxlength=32 required>"
+         "<label>Usuari <small>(nom&eacute;s xarxes amb usuari i contrasenya, com la del centre)</small></label>"
+         "<input name=user maxlength=64 autocomplete=off>"
+         "<label>Contrasenya</label><input name=pass type=password maxlength=63 autocomplete=off>"
+         "<button type=submit>Desar la xarxa</button></form>"
+         "<p class=g>Si una xarxa ja hi &eacute;s, es substitueix. Tamb&eacute; pots afegir-ne "
+         "des de la placa: Settings &gt; WLAN.</p>";
+    return sendPage(req, b);
+}
+
+esp_err_t handleWifiAdd(httpd_req_t *req)
+{
+    std::string body;
+    if (!readBody(req, body)) {
+        return ESP_FAIL;
+    }
+    wifi::Network n;
+    formField(body, "ssid", n.ssid);
+    formField(body, "user", n.user);
+    formField(body, "pass", n.password);
+    bool ok = !n.ssid.empty() && (n.password.empty() || n.user.size() > 0 || n.password.size() >= 8);
+    if (!ok || !wifi::rememberNetwork(n)) {
+        return sendPage(req, "<p class=err>No s'ha pogut desar (cal el nom de la xarxa i, "
+                             "si no hi ha usuari, una contrasenya de 8 car&agrave;cters o m&eacute;s).</p>"
+                             "<p><a href=/wifi>Tornar</a></p>");
+    }
+    return redirectTo(req, "/wifi");
+}
+
+esp_err_t handleWifiDel(httpd_req_t *req)
+{
+    std::string body, idx;
+    if (!readBody(req, body)) {
+        return ESP_FAIL;
+    }
+    if (formField(body, "i", idx)) {
+        wifi::forgetNetwork(static_cast<size_t>(atoi(idx.c_str())));
+    }
+    return redirectTo(req, "/wifi");
+}
+
 esp_err_t handleAgendaSync(httpd_req_t *req)
 {
     std::string body;
@@ -538,7 +602,7 @@ void startWebServer()
     agenda::begin();
     httpd_config_t cfg = HTTPD_DEFAULT_CONFIG();
     cfg.stack_size = 8192;
-    cfg.max_uri_handlers = 8;
+    cfg.max_uri_handlers = 12;
     cfg.lru_purge_enable = true;
     if (httpd_start(&g_server, &cfg) != ESP_OK) {
         ESP_LOGE(TAG, "Could not start the settings web server");
@@ -580,6 +644,21 @@ void startWebServer()
     ag_sync.method = HTTP_POST;
     ag_sync.handler = handleAgendaSync;
     httpd_register_uri_handler(g_server, &ag_sync);
+    httpd_uri_t wf = {};
+    wf.uri = "/wifi";
+    wf.method = HTTP_GET;
+    wf.handler = handleWifi;
+    httpd_register_uri_handler(g_server, &wf);
+    httpd_uri_t wf_add = {};
+    wf_add.uri = "/wifi/add";
+    wf_add.method = HTTP_POST;
+    wf_add.handler = handleWifiAdd;
+    httpd_register_uri_handler(g_server, &wf_add);
+    httpd_uri_t wf_del = {};
+    wf_del.uri = "/wifi/del";
+    wf_del.method = HTTP_POST;
+    wf_del.handler = handleWifiDel;
+    httpd_register_uri_handler(g_server, &wf_del);
     ESP_LOGI(TAG, "Settings web server started on port 80");
 }
 

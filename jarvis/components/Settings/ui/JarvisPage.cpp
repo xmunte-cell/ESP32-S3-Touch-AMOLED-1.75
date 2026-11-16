@@ -6,6 +6,9 @@
 #include "esp_log.h"
 #include "../Settings.hpp"
 #include "JarvisConfig.hpp"
+#include "JarvisWifi.hpp"
+
+#include <stdint.h>
 
 #include <string>
 #include <string.h>
@@ -108,6 +111,21 @@ namespace esp_brookesia::apps
             lv_obj_add_flag(row, LV_OBJ_FLAG_CLICKABLE);
             lv_obj_add_event_cb(row, rowClickedCb, LV_EVENT_CLICKED, (void *)&fields[i]);
         }
+        // Saved Wi-Fi networks: the board joins whichever one is in range.
+        settings_ui::add_section(list1, "Saved Wi-Fi (tap to forget)", style_list_text);
+        std::vector<jarvis::wifi::Network> nets = jarvis::wifi::savedNetworks();
+        if (nets.empty()) {
+            settings_ui::add_info_row(list1, LV_SYMBOL_WIFI, "None yet", "Settings > WLAN", style_list_btn);
+        }
+        for (size_t i = 0; i < nets.size(); i++) {
+            const char *kind = nets[i].user.empty() ? "password" : "user + password";
+            lv_obj_t *row = settings_ui::add_info_row(list1, LV_SYMBOL_WIFI, nets[i].ssid.c_str(), kind, style_list_btn);
+            lv_obj_add_style(row, &style_list_btn_pressed, LV_STATE_PRESSED);
+            lv_obj_add_flag(row, LV_OBJ_FLAG_CLICKABLE);
+            lv_obj_add_event_cb(row, networkClickedCb, LV_EVENT_CLICKED, (void *)(intptr_t)i);
+        }
+        settings_ui::add_info_row(list1, nullptr, "Add a network", "Settings > WLAN or web page", style_list_btn);
+
         settings_ui::add_section(list1, "Or edit from a computer", style_list_text);
         settings_ui::add_info_row(list1, LV_SYMBOL_WIFI, "Web page", web.c_str(), style_list_btn);
     }
@@ -128,7 +146,9 @@ namespace esp_brookesia::apps
         editing = field;
         jarvis::Settings s = jarvis::load();
         std::string current;
-        if (strcmp(field->key, "url") == 0) current = s.url;
+        if (strcmp(field->key, "name") == 0) current = s.name;
+        else if (strcmp(field->key, "eap_user") == 0) current = s.eap_user;
+        else if (strcmp(field->key, "url") == 0) current = s.url;
         else if (strcmp(field->key, "model") == 0) current = s.model;
         else if (strcmp(field->key, "lang") == 0) current = s.language;
         else if (strcmp(field->key, "voice") == 0) current = s.tts_voice;
@@ -166,6 +186,60 @@ namespace esp_brookesia::apps
         lv_label_set_text(hint, LV_SYMBOL_OK " save    " LV_SYMBOL_KEYBOARD " cancel");
         lv_obj_set_style_text_color(hint, lv_color_hex(0x8AA0AA), LV_PART_MAIN);
         lv_obj_align(hint, LV_ALIGN_TOP_MID, 0, 380);
+    }
+
+    void JarvisPage::networkClickedCb(lv_event_t *e)
+    {
+        if (_instance) {
+            _instance->openForget(static_cast<size_t>((intptr_t)lv_event_get_user_data(e)));
+        }
+    }
+
+    // Asks before forgetting a saved network (reuses the editor overlay).
+    void JarvisPage::openForget(size_t index)
+    {
+        std::vector<jarvis::wifi::Network> nets = jarvis::wifi::savedNetworks();
+        if (editor != nullptr || index >= nets.size()) {
+            return;
+        }
+        forget_index = index;
+        editor = lv_obj_create(lv_layer_top());
+        lv_obj_remove_style_all(editor);
+        lv_obj_set_size(editor, lv_pct(100), lv_pct(100));
+        lv_obj_set_style_bg_color(editor, lv_color_hex(0x000000), LV_PART_MAIN);
+        lv_obj_set_style_bg_opa(editor, LV_OPA_COVER, LV_PART_MAIN);
+        lv_obj_clear_flag(editor, LV_OBJ_FLAG_SCROLLABLE);
+
+        lv_obj_t *title = lv_label_create(editor);
+        lv_label_set_text_fmt(title, "Forget Wi-Fi\n%s ?", nets[index].ssid.c_str());
+        lv_obj_set_style_text_align(title, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
+        lv_obj_set_style_text_color(title, lv_color_hex(0x31E1FF), LV_PART_MAIN);
+        lv_obj_align(title, LV_ALIGN_CENTER, 0, -60);
+
+        const char *texts[2] = {"Cancel", "Forget"};
+        for (int i = 0; i < 2; i++) {
+            lv_obj_t *btn = lv_button_create(editor);
+            lv_obj_set_size(btn, 140, 60);
+            lv_obj_align(btn, LV_ALIGN_CENTER, i == 0 ? -80 : 80, 40);
+            lv_obj_set_style_bg_color(btn, lv_color_hex(i == 0 ? 0x33414A : 0xC0392B), LV_PART_MAIN);
+            lv_obj_t *l = lv_label_create(btn);
+            lv_label_set_text(l, texts[i]);
+            lv_obj_center(l);
+            lv_obj_add_event_cb(btn, forgetCb, LV_EVENT_CLICKED, (void *)(intptr_t)i);
+        }
+    }
+
+    void JarvisPage::forgetCb(lv_event_t *e)
+    {
+        if (!_instance) {
+            return;
+        }
+        if ((intptr_t)lv_event_get_user_data(e) == 1) {
+            jarvis::wifi::forgetNetwork(_instance->forget_index);
+        }
+        lv_async_call([](void *p) {
+            static_cast<JarvisPage *>(p)->closeEditor(false);
+        }, _instance);
     }
 
     void JarvisPage::keyboardCb(lv_event_t *e)
