@@ -76,6 +76,24 @@ def main():
 
     # 2. AIChats: talk to Open WebUI directly ------------------------------
     app = comp / "XiaozhiApp" / "XiaozhiApp.cpp"
+    # The app only learns about the network from IP events. If one is missed
+    # (for example while the board switches between saved networks) it would
+    # say "Cal connexio WiFi" for ever: check again every 2 seconds.
+    patch(app, "        if (!exit_requested) {\n            if (_control_event_lost.exchange(false)) {\n",
+          "        if (!exit_requested) {\n"
+          "            static TickType_t jv_net_check = 0;\n"
+          "            if (xTaskGetTickCount() - jv_net_check > pdMS_TO_TICKS(2000)) {\n"
+          "                jv_net_check = xTaskGetTickCount();\n"
+          "                const bool jv_ready = isNetworkReady();\n"
+          "                if (_visible.load() && !_shutdown.load() && jv_ready != _network_ready.load()) {\n"
+          "                    ESP_UTILS_LOGI(\"Jarvis: network is now %s\", jv_ready ? \"ready\" : \"down\");\n"
+          "                    ControlEvent jv_event = {};\n"
+          "                    jv_event.type = ControlEventType::NetworkChanged;\n"
+          "                    jv_event.flag = jv_ready;\n"
+          "                    handleControlEvent(jv_event);\n"
+          "                }\n"
+          "            }\n"
+          "            if (_control_event_lost.exchange(false)) {\n")
     patch(app, '#include "XiaozhiApp.hpp"\n',
           '#include "XiaozhiApp.hpp"\n#include "JarvisConfig.hpp"\n')
     cut_between(
