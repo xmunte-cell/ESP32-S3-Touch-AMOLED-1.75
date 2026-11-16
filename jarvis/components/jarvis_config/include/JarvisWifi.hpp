@@ -3,8 +3,8 @@
  *
  * Wi-Fi helpers for the factory Wi-Fi code:
  *  - WPA2/WPA3-Enterprise (user + password, PEAP/TTLS with MSCHAPv2);
- *  - a list of saved networks (up to 5, normal or company), so the board
- *    joins whichever saved network is in range.
+ *  - a list of saved networks (up to 5, normal or company); when the current
+ *    one does not answer the board tries the next saved one.
  * Everything is stored in NVS (namespace "jarvis").
  */
 #pragma once
@@ -27,9 +27,8 @@ constexpr size_t MAX_NETWORKS = 5;
 // true for the enterprise (802.1X) wifi_auth_mode_t values.
 bool isEnterprise(int authmode);
 
-// Call right before esp_wifi_connect(): picks the saved network in range
-// (keeping the current one when it is visible) and turns the enterprise
-// login on or off for it.
+// Call right before esp_wifi_connect(): after two failed tries moves on to
+// the next saved network, and turns the enterprise login on or off for it.
 void prepareConnect();
 
 std::vector<Network> savedNetworks();

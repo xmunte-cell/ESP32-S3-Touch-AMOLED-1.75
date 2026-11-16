@@ -14,6 +14,8 @@
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "esp_wifi.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 #include "nvs.h"
 
 namespace jarvis::wifi {
@@ -24,11 +26,18 @@ constexpr char TAG[] = "JarvisWifi";
 constexpr char NVS_NS[] = "jarvis";
 constexpr char NVS_KEY[] = "wifis";
 constexpr char SEP = '\x1f';  // field separator (never in SSIDs typed by people)
-constexpr int64_t MIN_SCAN_INTERVAL_US = 8 * 1000 * 1000;
+// Tries per network before moving to the next saved one, and how long a
+// connection must last to count as good (then the counters start again).
+constexpr int TRIES_PER_NETWORK = 2;
+constexpr int64_t GOOD_CONNECTION_US = 45LL * 1000 * 1000;
+constexpr int PAUSE_AFTER_ROUND_MS = 4000;
 
 std::mutex g_mutex;
 bool g_enterprise_on = false;
-int64_t g_last_scan_us = -MIN_SCAN_INTERVAL_US;
+std::string g_last_ssid;
+int g_tries = 0;
+size_t g_switches = 0;
+int64_t g_last_call_us = 0;
 
 std::vector<Network> loadLocked()
 {
@@ -136,52 +145,6 @@ void enterpriseOn(const std::string &user, const std::string &password)
     }
 }
 
-// Scans and returns the best visible saved network (or nullptr).
-// Keeps the current SSID when it is visible.
-const Network *pickVisible(const std::vector<Network> &list, const std::string &current)
-{
-    int64_t now = esp_timer_get_time();
-    if (now - g_last_scan_us < MIN_SCAN_INTERVAL_US) {
-        return nullptr;
-    }
-    g_last_scan_us = now;
-    wifi_scan_config_t sc = {};
-    if (esp_wifi_scan_start(&sc, true) != ESP_OK) {
-        return nullptr;  // e.g. the WLAN page is scanning right now
-    }
-    uint16_t count = 0;
-    esp_wifi_scan_get_ap_num(&count);
-    if (count == 0) {
-        return nullptr;
-    }
-    if (count > 30) {
-        count = 30;
-    }
-    std::vector<wifi_ap_record_t> aps(count);
-    if (esp_wifi_scan_get_ap_records(&count, aps.data()) != ESP_OK) {
-        return nullptr;
-    }
-    const Network *best = nullptr;
-    int best_rssi = -1000;
-    for (uint16_t i = 0; i < count; i++) {
-        std::string ssid(reinterpret_cast<const char *>(aps[i].ssid),
-                         strnlen(reinterpret_cast<const char *>(aps[i].ssid), sizeof(aps[i].ssid)));
-        for (const Network &n : list) {
-            if (n.ssid != ssid) {
-                continue;
-            }
-            if (ssid == current) {
-                return &n;  // the network chosen last stays while it is visible
-            }
-            if (aps[i].rssi > best_rssi) {
-                best_rssi = aps[i].rssi;
-                best = &n;
-            }
-        }
-    }
-    return best;
-}
-
 } // namespace
 
 bool isEnterprise(int authmode)
@@ -221,19 +184,43 @@ void prepareConnect()
         ESP_LOGI(TAG, "Saved the current Wi-Fi in the list");
     }
 
-    const Network *chosen = nullptr;
-    if (!list.empty()) {
-        chosen = pickVisible(list, current);
-    }
-    if (!chosen) {
-        // Not scanned (or nothing saved in range): use the saved entry for
-        // the current SSID, if any, so the enterprise settings are right.
-        for (const Network &n : list) {
-            if (n.ssid == current) {
-                chosen = &n;
-                break;
-            }
+    // No scanning here (it would block the WLAN page's own scan). Instead,
+    // when the current network keeps failing, try the next saved one.
+    const int64_t now = esp_timer_get_time();
+    if (now - g_last_call_us > GOOD_CONNECTION_US || current != g_last_ssid) {
+        g_tries = 0;  // the last connection worked for a while, or a new network was set
+        if (now - g_last_call_us > GOOD_CONNECTION_US) {
+            g_switches = 0;
         }
+    }
+    g_last_call_us = now;
+    g_tries++;
+
+    const Network *chosen = nullptr;
+    size_t index = list.size();
+    for (size_t i = 0; i < list.size(); i++) {
+        if (list[i].ssid == current) {
+            index = i;
+            break;
+        }
+    }
+    if (index < list.size()) {
+        chosen = &list[index];
+    }
+    if (list.size() > 1 && (index >= list.size() || g_tries > TRIES_PER_NETWORK)) {
+        size_t next = index >= list.size() ? 0 : (index + 1) % list.size();
+        chosen = &list[next];
+        g_tries = 1;
+        g_switches++;
+        if (g_switches >= list.size()) {
+            // None of the saved networks answered: rest a little so the
+            // radio is free (the WLAN page can scan) and try again.
+            g_switches = 0;
+            vTaskDelay(pdMS_TO_TICKS(PAUSE_AFTER_ROUND_MS));
+        }
+    } else if (list.size() <= 1 && g_tries > TRIES_PER_NETWORK) {
+        g_tries = 1;
+        vTaskDelay(pdMS_TO_TICKS(PAUSE_AFTER_ROUND_MS));
     }
 
     if (chosen && chosen->ssid != current) {
@@ -250,11 +237,13 @@ void prepareConnect()
         }
         if (esp_wifi_set_config(WIFI_IF_STA, &next) == ESP_OK) {
             cfg = next;
-            ESP_LOGI(TAG, "Switching to saved Wi-Fi in range (%s network)",
+            g_last_ssid = chosen->ssid;
+            ESP_LOGI(TAG, "Trying the next saved Wi-Fi (%s network)",
                      chosen->user.empty() ? "normal" : "company");
         }
     }
 
+    g_last_ssid = ssidOf(cfg);
     if (chosen && !chosen->user.empty()) {
         enterpriseOn(chosen->user, chosen->password);
         return;

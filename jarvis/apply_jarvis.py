@@ -254,6 +254,16 @@ def main():
           "                }\n"
           "                esp_err_t ret = brookesia::system_status::connect_wifi(wifi_config);\n")
 
+    # The factory page stops scanning for good after one failed scan (for
+    # example while the board is trying to join a network): retry instead.
+    patch(wl, '                    ESP_UTILS_LOGW("esp_wifi_scan_start failed: %s", esp_err_to_name(ret));\n'
+              '                    self->Wifi_state = DISCONNECT;\n'
+              '                    queue_lvgl_async(wifi_state_cb, self, scan_generation);\n'
+              '                    vTaskDelay(pdMS_TO_TICKS(300));\n',
+          '                    ESP_UTILS_LOGW("esp_wifi_scan_start failed: %s", esp_err_to_name(ret));\n'
+          '                    self->Wifi_state = WIFIOPEN;  // Jarvis: try the scan again\n'
+          '                    vTaskDelay(pdMS_TO_TICKS(700));\n')
+
     ss = comp / "system_status" / "system_status.cpp"
     text = ss.read_text(encoding="utf-8")
     first_include = text.index("#include")
