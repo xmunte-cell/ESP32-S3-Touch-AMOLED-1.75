@@ -58,9 +58,13 @@ constexpr size_t HEAD_ROOM = 512;   // multipart header goes before the WAV
 constexpr size_t TAIL_ROOM = 128;   // multipart trailer goes after it
 
 // End-of-speech detection (energy based) for the "auto" listening mode
-constexpr int VAD_RMS_SPEECH = 600;
+// The speech threshold follows the room's background noise (noise floor x 3,
+// at least VAD_RMS_MIN), so a noisy room does not keep the board listening.
+constexpr int VAD_RMS_MIN = 350;
+constexpr int VAD_NOISE_START_MAX = 400;
 constexpr int VAD_SILENCE_MS = 900;
-constexpr int NO_SPEECH_TIMEOUT_MS = 10000;  // nobody talks -> end the conversation
+constexpr int NO_SPEECH_TIMEOUT_MS = 8000;   // nobody talks -> end the conversation
+constexpr int MAX_LISTEN_MS = 12000;         // stop and send whatever was said
 constexpr int HISTORY_TURNS = 6;
 
 constexpr size_t MAX_TEXT_RESPONSE = 64 * 1024;
@@ -355,11 +359,27 @@ public:
         int rms = samples ? (int)sqrt(acc / samples) : 0;
         int ms = (int)(samples * 1000 / UPLINK_RATE);
         _listened_ms += ms;
-        if (rms >= VAD_RMS_SPEECH) {
+        if (_noise <= 0) {
+            _noise = rms < VAD_NOISE_START_MAX ? (rms > 30 ? rms : 30) : VAD_NOISE_START_MAX;
+        }
+        int threshold = _noise * 3 > VAD_RMS_MIN ? _noise * 3 : VAD_RMS_MIN;
+        if (rms >= threshold) {
+            if (!_heard_speech) {
+                ESP_LOGI(TAG, "Speech started (rms %d, noise %d)", rms, _noise);
+            }
             _heard_speech = true;
             _silence_ms = 0;
-        } else if (_heard_speech) {
-            _silence_ms += ms;
+        } else {
+            // Background level: falls fast, rises slowly.
+            _noise = rms < _noise ? (_noise * 3 + rms) / 4 : _noise + (rms - _noise) / 30 + 1;
+            if (_heard_speech) {
+                _silence_ms += ms;
+            }
+        }
+        if (_mode != ListeningMode::ManualStop && _heard_speech && _listened_ms >= MAX_LISTEN_MS) {
+            ESP_LOGI(TAG, "Listened %d s, sending what was said", MAX_LISTEN_MS / 1000);
+            finishUtterance();
+            return ESP_OK;
         }
 
         if (_mode != ListeningMode::ManualStop) {
@@ -391,6 +411,7 @@ public:
         _heard_speech = false;
         _silence_ms = 0;
         _listened_ms = 0;
+        _noise = 0;
         _abort = false;
         _listening = true;
         return ESP_OK;
@@ -513,7 +534,7 @@ private:
             Bytes resp(MAX_TEXT_RESPONSE);
             int64_t t0 = esp_log_timestamp();
             int status = httpPost(s.url + "/api/v1/audio/transcriptions", s.api_key, ctype.c_str(),
-                                  start, total, resp, 30000);
+                                  start, total, resp, 15000);
             ESP_LOGI(TAG, "STT HTTP %d in %ld ms (%.1f s of audio)", status,
                      (long)(esp_log_timestamp() - t0), pcm_len / 2.0 / UPLINK_RATE);
             if (status != 200) {
@@ -536,7 +557,7 @@ private:
         ESP_LOGI(TAG, "User: %s", text.c_str());
         if (text.empty() || text.find("Amara.org") != std::string::npos ||
                 text.find("Subtítols") != std::string::npos) {
-            endTurnSilently();
+            fail("No t'he entès. Torna-ho a dir.");
             return;
         }
         if (_abort || _exit) {
@@ -662,7 +683,7 @@ private:
         Bytes resp(MAX_TTS_RESPONSE);
         int64_t t0 = esp_log_timestamp();
         int status = httpPost(s.url + "/api/v1/audio/speech", s.api_key, "application/json",
-                              (const uint8_t *)payload, strlen(payload), resp, 60000);
+                              (const uint8_t *)payload, strlen(payload), resp, 20000);
         cJSON_free(payload);
         ESP_LOGI(TAG, "TTS HTTP %d in %ld ms (%u bytes)", status, (long)(esp_log_timestamp() - t0),
                  (unsigned)resp.len);
@@ -801,6 +822,7 @@ private:
     bool _heard_speech = false;
     int _silence_ms = 0;
     int _listened_ms = 0;
+    int _noise = 0;
 
     TaskHandle_t _task = nullptr;
     SemaphoreHandle_t _work = nullptr;
