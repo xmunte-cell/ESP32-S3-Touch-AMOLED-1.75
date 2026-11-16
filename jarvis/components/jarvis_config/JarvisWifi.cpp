@@ -6,6 +6,7 @@
 #include <string.h>
 
 #include <algorithm>
+#include <atomic>
 #include <mutex>
 #include <string>
 
@@ -38,6 +39,7 @@ std::string g_last_ssid;
 int g_tries = 0;
 size_t g_switches = 0;
 int64_t g_last_call_us = 0;
+std::atomic<int64_t> g_hold_until_us{0};
 
 std::vector<Network> loadLocked()
 {
@@ -160,8 +162,17 @@ bool isEnterprise(int authmode)
     }
 }
 
+void holdReconnects(int ms)
+{
+    g_hold_until_us.store(ms > 0 ? esp_timer_get_time() + static_cast<int64_t>(ms) * 1000 : 0);
+}
+
 void prepareConnect()
 {
+    // The WLAN page is scanning: wait (bounded) so the radio stays free.
+    for (int i = 0; i < 100 && esp_timer_get_time() < g_hold_until_us.load(); i++) {
+        vTaskDelay(pdMS_TO_TICKS(100));
+    }
     std::lock_guard<std::mutex> lock(g_mutex);
     wifi_config_t cfg = {};
     if (esp_wifi_get_config(WIFI_IF_STA, &cfg) != ESP_OK) {

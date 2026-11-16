@@ -31,6 +31,10 @@ bool isEnterprise(int authmode);
 // the next saved network, and turns the enterprise login on or off for it.
 void prepareConnect();
 
+// The WLAN page calls this before scanning: reconnect attempts wait up to
+// `ms` milliseconds (0 = stop waiting) so the scan can run.
+void holdReconnects(int ms);
+
 std::vector<Network> savedNetworks();
 // Adds or updates (same SSID) a network; the newest goes first.
 bool rememberNetwork(const Network &network);

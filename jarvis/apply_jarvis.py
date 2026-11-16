@@ -282,8 +282,20 @@ def main():
               '                    queue_lvgl_async(wifi_state_cb, self, scan_generation);\n'
               '                    vTaskDelay(pdMS_TO_TICKS(300));\n',
           '                    ESP_UTILS_LOGW("esp_wifi_scan_start failed: %s", esp_err_to_name(ret));\n'
-          '                    self->Wifi_state = WIFIOPEN;  // Jarvis: try the scan again\n'
-          '                    vTaskDelay(pdMS_TO_TICKS(700));\n')
+          '                    // Jarvis: the board is busy trying to join a network. Pause\n'
+          '                    // those tries, stop the current one and scan again.\n'
+          '                    jarvis::wifi::holdReconnects(6000);\n'
+          '                    esp_wifi_disconnect();\n'
+          '                    self->Wifi_state = WIFIOPEN;\n'
+          '                    vTaskDelay(pdMS_TO_TICKS(300));\n')
+    patch(wl, '                esp_err_t ret = esp_wifi_scan_start(NULL, true);\n',
+          '                // Jarvis: keep the board\'s reconnect tries off the radio\n'
+          '                // while this scan runs (they would cut it short).\n'
+          '                jarvis::wifi::holdReconnects(6000);\n'
+          '                esp_err_t ret = esp_wifi_scan_start(NULL, true);\n')
+    patch(wl, '                self->scanned_ap_count = number;\n',
+          '                self->scanned_ap_count = number;\n'
+          '                jarvis::wifi::holdReconnects(0);  // Jarvis: scan done\n')
 
     ss = comp / "system_status" / "system_status.cpp"
     text = ss.read_text(encoding="utf-8")
