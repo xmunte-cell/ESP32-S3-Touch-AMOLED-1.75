@@ -205,9 +205,13 @@ def main():
     patch(wl, '#include "nvs.h"\n',
           '#include "nvs.h"\n#include "JarvisConfig.hpp"\n#include "JarvisWifi.hpp"\n\n'
           '// Jarvis: for enterprise networks the keyboard first asks for the user.\n'
-          'static bool s_jv_ask_user = false;\n')
+          'static bool s_jv_ask_user = false;\n'
+          '// Jarvis: true while the keyboard is open, so background Wi-Fi events\n'
+          '// (failed reconnects, scans) do not close it under the user\'s fingers.\n'
+          'static volatile bool s_jv_typing = false;\n')
     patch(wl, '            lv_keyboard_set_textarea(kb, ta);\n\n        }\n    }\n',
           '            lv_keyboard_set_textarea(kb, ta);\n'
+          '            s_jv_typing = true;\n'
           '            s_jv_ask_user = jarvis::wifi::isEnterprise(page->ap_info[page->wifi_index].authmode);\n'
           '            lv_textarea_set_password_mode(ta, !s_jv_ask_user);\n'
           '            lv_textarea_set_placeholder_text(ta, s_jv_ask_user ? "User name..." : "Enter password...");\n'
@@ -220,6 +224,7 @@ def main():
     patch(wl, '        if (code == LV_EVENT_CANCEL) {\n',
           '        if (code == LV_EVENT_CANCEL) {\n'
           '            s_jv_ask_user = false;\n'
+          '            s_jv_typing = false;\n'
           '            lv_textarea_set_password_mode(self->ta, true);\n')
     patch(wl, '        if (code == LV_EVENT_READY) {\n\n            strlcpy(self->wifi_pwd, lv_textarea_get_text(ta), sizeof(self->wifi_pwd));\n',
           '        if (code == LV_EVENT_READY && s_jv_ask_user) {\n'
@@ -235,7 +240,23 @@ def main():
           '            return;\n'
           '        }\n\n'
           '        if (code == LV_EVENT_READY) {\n\n'
+          '            s_jv_typing = false;\n'
           '            strlcpy(self->wifi_pwd, lv_textarea_get_text(ta), sizeof(self->wifi_pwd));\n')
+    patch(wl, '        if (!self || !self->page_active || !self->list1) {\n'
+              '            return;\n'
+              '        }\n'
+              '        if (self->kb) {\n',
+          '        if (!self || !self->page_active || !self->list1) {\n'
+          '            return;\n'
+          '        }\n'
+          '        if (s_jv_typing) {\n'
+          '            return;  // Jarvis: the user is typing the user name or password\n'
+          '        }\n'
+          '        if (self->kb) {\n')
+    patch(wl, '            if (has_stored_ssid && self->_nvs_param_map[NVS_KEY_WIFI_ENABLE]) {\n',
+          '            if (has_stored_ssid && self->_nvs_param_map[NVS_KEY_WIFI_ENABLE] && !s_jv_typing) {\n')
+    patch(wl, '        ESP_UTILS_LOGI("WlanPage Run");\n',
+          '        ESP_UTILS_LOGI("WlanPage Run");\n        s_jv_typing = false;\n')
     patch(wl, '            if (strlen(self->wifi_pwd) >= 8)\n',
           '            if (strlen(self->wifi_pwd) >= 8 ||\n'
           '                    (self->wifi_pwd[0] != 0 &&\n'
